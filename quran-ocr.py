@@ -495,7 +495,7 @@ for page_no in range(PAGE_START, PAGE_END + 1):
                 'page': page_no,
                 'sura': ref_suras[ref_idx_sura - 1].get('index'),
                 'aya': aya_no,
-                'role': 'ayah' if bbox['label'] == 'line' else bbox['label'],
+                'type': 'ayah' if bbox['label'] == 'line' else bbox['label'],
                 'x1': bbox['top_left_x'],
                 'y1': bbox['top_left_y'],
                 'x2': bbox['bottom_right_x'],
