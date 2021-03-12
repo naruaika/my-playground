@@ -19,6 +19,11 @@ QURAN_TYPES = {  # from Qurancomplex.gov.sa
         'page-end': 607,
         'dpi': 190
     },
+    'hafs-standardthree': {
+        'page-start': 3,
+        'page-end': 524,
+        'dpi': 190
+    },
 
     # for me finding a segmentation algorithm for each printing
     'sample': {
@@ -30,12 +35,17 @@ QURAN_TYPES = {  # from Qurancomplex.gov.sa
         'page-start': 3,
         'page-end': 8,
         'dpi': 190
+    },
+    'sample3': {
+        'page-start': 3,
+        'page-end': 8,
+        'dpi': 190
     }
 }
 
 
 # User-defined variables
-QURAN_TYPE = 'hafs-jawamee39'
+QURAN_TYPE = 'hafs-standardthree'
 PAGE_OUTPUT_WIDTH = 540  # in pixel
 
 QURAN_INPUT_FILEPATH = '/home/naru/Repositories/my-playground/dataset/' \
@@ -332,21 +342,17 @@ for page_no, page in enumerate(PAGES):
             path.join(QURAN_OUTPUT_DIR, f'{QURAN_TYPE}-1_'
                       f'{page_no + 1}.{IMAGE_FORMAT}'), img_mod
         )
-    if QURAN_TYPE in ['hafs-jawamee39', 'sample2']:
-        if page_no >= PAGE_START + 2 or not SPECIAL_12PAGES:
-            img_mod = cv2.Canny(img_mod, 100, 200)
-            cv2.floodFill(img_mod, None, (0, 0), 255)  # assume that the
-                                                       # background is white
-            cv2.floodFill(img_mod, None, (0, 0), 0)
-        else:
+    if page_no >= PAGE_START + 2 or not SPECIAL_12PAGES:
+        img_mod = cv2.Canny(img_mod, 100, 200)
+        cv2.floodFill(img_mod, None, (0, 0), 255)  # assume that the
+                                                   # background is white
+        cv2.floodFill(img_mod, None, (0, 0), 0)
+    else:
+        if QURAN_TYPE in ['hafs-jawamee39', 'sample2', 'hafs-standardthree',
+                          'sample3']:
             cv2.floodFill(img_mod, None, (0, 0), 255)
             img_mod = cv2.bitwise_not(img_mod)
-    if QURAN_TYPE in ['hafs-standard39', 'sample']:
-        if page_no >= PAGE_START + 2 or not SPECIAL_12PAGES:
-            img_mod = cv2.Canny(img_mod, 100, 200)
-            cv2.floodFill(img_mod, None, (0, 0), 255)
-            cv2.floodFill(img_mod, None, (0, 0), 0)
-        else:
+        elif QURAN_TYPE in ['hafs-standard39', 'sample']:
             cv2.floodFill(img_mod, None, (0, 0), 255)
             cv2.floodFill(img_mod, None, (PAGE_WIDTH - 1, PAGE_HEIGHT - 1), 255)
             cv2.floodFill(img_mod, None, (0, 0), 0)
@@ -397,7 +403,6 @@ for page_no, page in enumerate(PAGES):
         print(f'{" " * 8} h: {h}.')
 
     # Find outermost outline
-    # TODO: doesn't seem good yet
     if VERBOSE_MODE:
         print(f'{" " * 8} Defining outermost outline ...')
     bboxes = cv2.findContours(img_mod, cv2.RETR_EXTERNAL,
@@ -411,8 +416,8 @@ for page_no, page in enumerate(PAGES):
         x, y, w, h = cv2.boundingRect(bbox)
         x1 = min(x, x1)
         y1 = min(y, y1)
-        x2 = max(x, x2)
-        y2 = max(y, y2)
+        x2 = max(x + w, x2)
+        y2 = max(y + h, y2)
     PAGE_BORDER = {
         'top_left_x': x1,
         'top_left_y': y1,
@@ -501,6 +506,8 @@ for page_no, page in enumerate(PAGES):
         print(f'{" " * 8} Defining lines ...')
     line_numbers = (LINE_NUMBERS[1] if page_no >= PAGE_START + 2 or
                     not SPECIAL_12PAGES else LINE_NUMBERS[0])
+    if QURAN_TYPE in ['hafs-standardthree', 'sample3']:
+        line_numbers -= len([1 for bbox in bbox_sb if bbox['label'] == 'surah'])
     h = (PAGE_BORDER['bottom_right_y'] - PAGE_BORDER['top_left_y']) // line_numbers
     y = PAGE_BORDER['top_left_y']
     bbox_lines = []
@@ -540,35 +547,73 @@ for page_no, page in enumerate(PAGES):
                 if bbox_lines[idx_line]['top_left_y'] < \
                         get_y_center(bbox_sb[idx_sb]) < \
                         bbox_lines[idx_line]['bottom_right_y']:
-                    # Resize current line height
-                    bbox_lines[idx_line]['bottom_right_y'] = \
-                        bbox_lines[idx_line]['top_left_y'] + \
-                        bbox_sb[idx_sb]['bottom_right_y'] - \
-                        bbox_sb[idx_sb]['top_left_y']
-                    # Resize all lines below, but before next surah or bismillah
-                    # marker if any
-                    line_idxs = []
-                    idx_line_ = idx_line + 1
-                    while idx_line_ < line_numbers:
-                        line_idxs.append(idx_line_)
-                        idx_line_ += 1
-                        try:
-                            if bbox_lines[idx_line_]['label'] \
-                                    in ['surah', 'bismillah']:
+                    if QURAN_TYPE in ['hafs-standardthree', 'sample3']:
+                        # Resize current line height
+                        new_h = bbox_sb[idx_sb]['bottom_right_y'] - \
+                            bbox_sb[idx_sb]['top_left_y']
+                        shift_y = 4 / PAGE_SCALE
+                        if idx_line - 1 >= 0 and bbox_sb[idx_sb]['label'] == 'surah':
+                            bbox_lines[idx_line]['top_left_y'] = \
+                                bbox_lines[idx_line]['top_left_y'] - shift_y
+                            bbox_lines[idx_line - 1]['bottom_right_y'] = \
+                                bbox_lines[idx_line]['top_left_y']
+                        bbox_lines[idx_line]['bottom_right_y'] = \
+                            bbox_lines[idx_line]['top_left_y'] + new_h
+                        # Resize all line bounding boxes below
+                        line_idxs = range(idx_line + 1, line_numbers)
+                        if line_idxs:
+                            y1 = bbox_lines[idx_line]['bottom_right_y']
+                            y2 = bbox_lines[line_idxs[-1]]['bottom_right_y']
+                            h = (bbox_lines[line_idxs[-1]]['bottom_right_y'] -
+                                 y1) // len(line_idxs)
+                            bbox_lines[line_idxs[-1]]['top_left_y'] = y1
+                            idx_sb_ = idx_sb + 1
+                            for idx in line_idxs:
+                                bbox_lines[idx]['top_left_y'] = \
+                                    bbox_lines[idx - 1]['bottom_right_y']
+                                bbox_lines[idx]['bottom_right_y'] = \
+                                    bbox_lines[idx]['top_left_y'] + h
+                                # Relabeling lines
+                                label = 'line'
+                                if idx_sb_ < len(bbox_sb):
+                                    if bbox_lines[idx]['top_left_y'] < \
+                                            get_y_center(bbox_sb[idx_sb_]) < \
+                                            bbox_lines[idx]['bottom_right_y']:
+                                        label = bbox_sb[idx_sb_]['label']
+                                        idx_sb_ += 1
+                                bbox_lines[idx]['label'] = label
+                            bbox_lines[line_idxs[-1]]['bottom_right_y'] = y2
+                    else:
+                        # Resize current line height
+                        bbox_lines[idx_line]['bottom_right_y'] = \
+                            bbox_lines[idx_line]['top_left_y'] + \
+                            bbox_sb[idx_sb]['bottom_right_y'] - \
+                            bbox_sb[idx_sb]['top_left_y']
+                        # Resize all lines below, but before next surah or
+                        # bismillah marker if any
+                        line_idxs = []
+                        idx_line_ = idx_line + 1
+                        while idx_line_ < line_numbers:
+                            line_idxs.append(idx_line_)
+                            idx_line_ += 1
+                            try:
+                                if bbox_lines[idx_line_]['label'] \
+                                        in ['surah', 'bismillah']:
+                                    break
+                            except:
                                 break
-                        except:
-                            break
-                    if line_idxs:
-                        y1 = bbox_lines[idx_line]['bottom_right_y']
-                        y2 = bbox_lines[line_idxs[-1]]['bottom_right_y']
-                        h = (bbox_lines[line_idxs[-1]]['bottom_right_y'] - y1) // len(line_idxs)
-                        bbox_lines[line_idxs[-1]]['top_left_y'] = y1
-                        for idx in line_idxs:
-                            bbox_lines[idx]['top_left_y'] = \
-                                bbox_lines[idx - 1]['bottom_right_y']
-                            bbox_lines[idx]['bottom_right_y'] = \
-                                bbox_lines[idx]['top_left_y'] + h
-                        bbox_lines[line_idxs[-1]]['bottom_right_y'] = y2
+                        if line_idxs:
+                            y1 = bbox_lines[idx_line]['bottom_right_y']
+                            y2 = bbox_lines[line_idxs[-1]]['bottom_right_y']
+                            h = (bbox_lines[line_idxs[-1]]['bottom_right_y'] -
+                                 y1) // len(line_idxs)
+                            bbox_lines[line_idxs[-1]]['top_left_y'] = y1
+                            for idx in line_idxs:
+                                bbox_lines[idx]['top_left_y'] = \
+                                    bbox_lines[idx - 1]['bottom_right_y']
+                                bbox_lines[idx]['bottom_right_y'] = \
+                                    bbox_lines[idx]['top_left_y'] + h
+                            bbox_lines[line_idxs[-1]]['bottom_right_y'] = y2
                     idx_sb += 1
         if VERBOSE_MODE:
             print('[  Ok  ] Refined line bounding boxes.')
