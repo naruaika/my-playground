@@ -24,21 +24,29 @@ QURAN_TYPES = {  # from Qurancomplex.gov.sa
         'page-end': 524,
         'dpi': 190
     },
-
-    # for me finding a segmentation algorithm for each printing
-    'sample': {
+    'hafs-wasat39': {
         'page-start': 3,
-        'page-end': 8,
+        'page-end': 607,
         'dpi': 190
     },
-    'sample2': {
+    'qiraat-douri': {
         'page-start': 3,
-        'page-end': 8,
+        'page-end': 607,
         'dpi': 190
     },
-    'sample3': {
+    'qiraat-shuba': {
         'page-start': 3,
-        'page-end': 8,
+        'page-end': 607,
+        'dpi': 190
+    },
+    'qiraat-warsh39': {
+        'page-start': 3,
+        'page-end': 607,
+        'dpi': 190
+    },
+    'qiraat-sousi': {
+        'page-start': 3,
+        'page-end': 607,
         'dpi': 190
     }
 }
@@ -50,12 +58,21 @@ PAGE_OUTPUT_WIDTH = 540  # in pixel
 
 QURAN_INPUT_FILEPATH = '/home/naru/Repositories/my-playground/dataset/' \
                        f'quran-images/{QURAN_TYPE}.pdf'
+# To optimise the output images, I used a program `optipng` run with a command
+# `for i in *.png; do optipng -o5 -keep -preserve -dir optimized "$i"; done`
+# to batch process all images at current working directory.
 QURAN_OUTPUT_DIR = '/home/naru/Repositories/my-playground/dataset/' \
                    'quran-images/output/'
 
+# This application use template matching to find ayah, surah, and bismillah
+# markers. So, make sure you have them all at `DIACRITICS_DIR`. For ayah and
+# bismillah marker, each of them must be provided two version: the small one
+# from pages 1-2 and the standard one.
 DIACRITICS_DIR = '/home/naru/Repositories/my-playground/dataset/quran-glyphs/'
 IMAGE_FORMAT = 'png'
 
+# The first thing we can do to verify the mapping of ayah bounding boxes for all
+# surah and ayah is check whether it is end with surah An-Naas (114) ayah 6.
 METADATA_INPUT_FILEPATH = '/home/naru/Repositories/my-playground/dataset/' \
                           'quran-metadata.xml'  # from Tanzil.net
 METADATA_OUTPUT_FILEPATH = path.join(QURAN_OUTPUT_DIR,
@@ -76,9 +93,9 @@ LINE_NUMBERS = (7, 15)  # for the first two pages and the default pages
 SPECIAL_12PAGES = True  # if the first two pages have a special design;
                         # as they usually have smaller font size
 
-GENERATE_INDEXING = True
-GENERATE_PREVIEWS = True
-VERBOSE_MODE = True
+GENERATE_INDEXING = True  # default is `True`; there's no reason to disable it
+GENERATE_PREVIEWS = True  # default is `False`
+VERBOSE_MODE = False  # default is `False`
 
 
 print('Bismillaah.')
@@ -331,7 +348,12 @@ for page_no, page in enumerate(PAGES):
     if VERBOSE_MODE:
         print(f'{" " * 8} Defining page border ...')
     img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    img_mod = cv2.GaussianBlur(img_gray, (15, 15), 0)
+    if QURAN_TYPE in ['qiraat-sousi', 'sample8']:
+        img_mod = cv2.GaussianBlur(img_gray, (9, 9), 0)
+    elif QURAN_TYPE in ['hafs-wasat39', 'sample4', 'qiraat-warsh39', 'sample7']:
+        img_mod = cv2.GaussianBlur(img_gray, (11, 11), 0)
+    else:
+        img_mod = cv2.GaussianBlur(img_gray, (15, 15), 0)
     _, img_thres = cv2.threshold(
         img_mod,
         0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
@@ -344,15 +366,26 @@ for page_no, page in enumerate(PAGES):
         )
     if page_no >= PAGE_START + 2 or not SPECIAL_12PAGES:
         img_mod = cv2.Canny(img_mod, 100, 200)
+        kernel = np.ones((2, 2), np.uint8)
+        if QURAN_TYPE in ['qiraat-sousi', 'sample8']:  # may apply to others
+            img_mod = cv2.dilate(img_mod, kernel, iterations=2)
+        else:
+            img_mod = cv2.dilate(img_mod, kernel)
         cv2.floodFill(img_mod, None, (0, 0), 255)  # assume that the
                                                    # background is white
         cv2.floodFill(img_mod, None, (0, 0), 0)
-    else:
+    else:  # for pages 1-2
+        kernel = np.ones((3, 3), np.uint8)
+        img_mod = cv2.dilate(img_mod, kernel)
         if QURAN_TYPE in ['hafs-jawamee39', 'sample2', 'hafs-standardthree',
-                          'sample3']:
+                          'sample3', 'hafs-wasat39', 'sample4',
+                          'qiraat-warsh39', 'sample7']:
             cv2.floodFill(img_mod, None, (0, 0), 255)
             img_mod = cv2.bitwise_not(img_mod)
-        elif QURAN_TYPE in ['hafs-standard39', 'sample']:
+        else:
+            if QURAN_TYPE in ['qiraat-sousi', 'sample8']:
+                kernel = np.ones((2, 2), np.uint8)
+                img_mod = cv2.dilate(img_mod, kernel, iterations=2)
             cv2.floodFill(img_mod, None, (0, 0), 255)
             cv2.floodFill(img_mod, None, (PAGE_WIDTH - 1, PAGE_HEIGHT - 1), 255)
             cv2.floodFill(img_mod, None, (0, 0), 0)
@@ -378,7 +411,7 @@ for page_no, page in enumerate(PAGES):
     # Remove page border
     if page_no >= PAGE_START + 2 or not SPECIAL_12PAGES:
         img_mod = 0 * np.ones((PAGE_HEIGHT, PAGE_WIDTH), np.uint8)
-    else:
+    else:  # for pages 1-2
         img_mod = 255 * np.ones((PAGE_HEIGHT, PAGE_WIDTH), np.uint8)
     img_mod[
         PAGE_BORDER['top_left_y']:PAGE_BORDER['bottom_right_y'],
@@ -389,8 +422,11 @@ for page_no, page in enumerate(PAGES):
     ]
     if page_no >= PAGE_START + 2 or not SPECIAL_12PAGES:
         ...
-    else:
+    else:  # for pages 1-2
         cv2.floodFill(img_mod, None, (0, 0), 0)
+        # TODO: needs re-checking for all `QURAN_TYPE`
+        kernel = np.ones((3, 3), np.uint8)
+        img_mod = cv2.morphologyEx(img_mod, cv2.MORPH_OPEN, kernel)
     if VERBOSE_MODE:
         cv2.imwrite(
             path.join(QURAN_OUTPUT_DIR, f'{QURAN_TYPE}-3_'
@@ -492,12 +528,15 @@ for page_no, page in enumerate(PAGES):
                           f'{page_no + 1}.{IMAGE_FORMAT}'), img_mod_
             )
             print(f'[  Ok  ] Found {len(markers)} markers:')
-            print(f'{" " * 8} {ayas} ayahs,')
-            print(f'{" " * 8} {bismillas} bismillahs,')
-            print(f'{" " * 8} {suras} surahs.')
+            print(f'{" " * 8} {ayas} ayah(s),')
+            print(f'{" " * 8} {bismillas} bismillah(s),')
+            print(f'{" " * 8} {suras} surah(s).')
         else:
-            print('[Failed] Cannot found any marker.')
+            print('[Failed] Cannot find any marker.')
             sys.exit()
+    elif not markers:
+        print('[Failed] Cannot find any marker.')
+        sys.exit()
 
     # Find lines
     bbox_sb = [bbox for bbox in markers if bbox['label'] != 'ayah']
@@ -506,8 +545,6 @@ for page_no, page in enumerate(PAGES):
         print(f'{" " * 8} Defining lines ...')
     line_numbers = (LINE_NUMBERS[1] if page_no >= PAGE_START + 2 or
                     not SPECIAL_12PAGES else LINE_NUMBERS[0])
-    if QURAN_TYPE in ['hafs-standardthree', 'sample3']:
-        line_numbers -= len([1 for bbox in bbox_sb if bbox['label'] == 'surah'])
     h = (PAGE_BORDER['bottom_right_y'] - PAGE_BORDER['top_left_y']) // line_numbers
     y = PAGE_BORDER['top_left_y']
     bbox_lines = []
@@ -537,84 +574,64 @@ for page_no, page in enumerate(PAGES):
             print(f'{" " * 10} x2: {bbox_line["bottom_right_x"]},')
             print(f'{" " * 10} y2: {bbox_line["bottom_right_y"]}.')
 
-    # Refine line (height) bounding boxes
+    # Refine line (height) bounding boxes based on surah and bismillah marker
     if page_no >= PAGE_START + 2 or not SPECIAL_12PAGES:
         if VERBOSE_MODE:
             print(f'{" " * 8} Refining line bounding boxes ...')
         idx_sb = 0
+        tobe_merged_idxs = []  # for merging two lines belonging to a surah
+                               # marker in hafs-standardthree musshaf only
         for idx_line in range(len(bbox_lines)):
             if idx_sb < len(bbox_sb):
                 if bbox_lines[idx_line]['top_left_y'] < \
                         get_y_center(bbox_sb[idx_sb]) < \
                         bbox_lines[idx_line]['bottom_right_y']:
-                    if QURAN_TYPE in ['hafs-standardthree', 'sample3']:
-                        # Resize current line height
-                        new_h = bbox_sb[idx_sb]['bottom_right_y'] - \
-                            bbox_sb[idx_sb]['top_left_y']
-                        shift_y = 4 / PAGE_SCALE
-                        if idx_line - 1 >= 0 and bbox_sb[idx_sb]['label'] == 'surah':
-                            bbox_lines[idx_line]['top_left_y'] = \
-                                bbox_lines[idx_line]['top_left_y'] - shift_y
-                            bbox_lines[idx_line - 1]['bottom_right_y'] = \
-                                bbox_lines[idx_line]['top_left_y']
-                        bbox_lines[idx_line]['bottom_right_y'] = \
-                            bbox_lines[idx_line]['top_left_y'] + new_h
-                        # Resize all line bounding boxes below
-                        line_idxs = range(idx_line + 1, line_numbers)
-                        if line_idxs:
-                            y1 = bbox_lines[idx_line]['bottom_right_y']
-                            y2 = bbox_lines[line_idxs[-1]]['bottom_right_y']
-                            h = (bbox_lines[line_idxs[-1]]['bottom_right_y'] -
-                                 y1) // len(line_idxs)
-                            bbox_lines[line_idxs[-1]]['top_left_y'] = y1
-                            idx_sb_ = idx_sb + 1
-                            for idx in line_idxs:
-                                bbox_lines[idx]['top_left_y'] = \
-                                    bbox_lines[idx - 1]['bottom_right_y']
-                                bbox_lines[idx]['bottom_right_y'] = \
-                                    bbox_lines[idx]['top_left_y'] + h
-                                # Relabeling lines
-                                label = 'line'
-                                if idx_sb_ < len(bbox_sb):
-                                    if bbox_lines[idx]['top_left_y'] < \
-                                            get_y_center(bbox_sb[idx_sb_]) < \
-                                            bbox_lines[idx]['bottom_right_y']:
-                                        label = bbox_sb[idx_sb_]['label']
-                                        idx_sb_ += 1
-                                bbox_lines[idx]['label'] = label
-                            bbox_lines[line_idxs[-1]]['bottom_right_y'] = y2
-                    else:
-                        # Resize current line height
-                        bbox_lines[idx_line]['bottom_right_y'] = \
-                            bbox_lines[idx_line]['top_left_y'] + \
-                            bbox_sb[idx_sb]['bottom_right_y'] - \
-                            bbox_sb[idx_sb]['top_left_y']
-                        # Resize all lines below, but before next surah or
-                        # bismillah marker if any
-                        line_idxs = []
-                        idx_line_ = idx_line + 1
-                        while idx_line_ < line_numbers:
-                            line_idxs.append(idx_line_)
-                            idx_line_ += 1
-                            try:
-                                if bbox_lines[idx_line_]['label'] \
-                                        in ['surah', 'bismillah']:
-                                    break
-                            except:
+                    if QURAN_TYPE in ['hafs-standardthree', 'sample3'] and \
+                            bbox_sb[idx_sb]['label'] == 'surah':
+                        tobe_merged_idxs.append(idx_line - 1)
+                        idx_sb += 1
+                        continue
+                    # Resize current line height
+                    bbox_lines[idx_line]['bottom_right_y'] = \
+                        bbox_lines[idx_line]['top_left_y'] + \
+                        bbox_sb[idx_sb]['bottom_right_y'] - \
+                        bbox_sb[idx_sb]['top_left_y']
+                    # Resize all lines below, but before next surah or
+                    # bismillah marker if any
+                    line_idxs = []
+                    idx_line_ = idx_line + 1
+                    while idx_line_ < line_numbers:  # TODO: re-code this
+                        line_idxs.append(idx_line_)
+                        idx_line_ += 1
+                        try:
+                            if bbox_lines[idx_line_]['label'] \
+                                    in ['surah', 'bismillah']:
                                 break
-                        if line_idxs:
-                            y1 = bbox_lines[idx_line]['bottom_right_y']
-                            y2 = bbox_lines[line_idxs[-1]]['bottom_right_y']
-                            h = (bbox_lines[line_idxs[-1]]['bottom_right_y'] -
-                                 y1) // len(line_idxs)
-                            bbox_lines[line_idxs[-1]]['top_left_y'] = y1
-                            for idx in line_idxs:
-                                bbox_lines[idx]['top_left_y'] = \
-                                    bbox_lines[idx - 1]['bottom_right_y']
-                                bbox_lines[idx]['bottom_right_y'] = \
-                                    bbox_lines[idx]['top_left_y'] + h
-                            bbox_lines[line_idxs[-1]]['bottom_right_y'] = y2
+                        except:
+                            break
+                    if line_idxs:
+                        y1 = bbox_lines[idx_line]['bottom_right_y']
+                        y2 = bbox_lines[line_idxs[-1]]['bottom_right_y']
+                        h = (bbox_lines[line_idxs[-1]]['bottom_right_y'] -
+                                y1) // len(line_idxs)
+                        bbox_lines[line_idxs[-1]]['top_left_y'] = y1
+                        for idx in line_idxs:
+                            bbox_lines[idx]['top_left_y'] = \
+                                bbox_lines[idx - 1]['bottom_right_y']
+                            bbox_lines[idx]['bottom_right_y'] = \
+                                bbox_lines[idx]['top_left_y'] + h
+                        bbox_lines[line_idxs[-1]]['bottom_right_y'] = y2
                     idx_sb += 1
+        if QURAN_TYPE in ['hafs-standardthree', 'sample3']:
+            tobe_removed_lines = []
+            for idx in tobe_merged_idxs:
+                bbox_lines[idx + 1]['top_left_x'] = \
+                    bbox_lines[idx]['top_left_x']
+                bbox_lines[idx + 1]['top_left_y'] = \
+                    bbox_lines[idx]['top_left_y']
+                tobe_removed_lines.append(bbox_lines[idx])
+            for bbox_line in tobe_removed_lines:
+                bbox_lines.remove(bbox_line)
         if VERBOSE_MODE:
             print('[  Ok  ] Refined line bounding boxes.')
             for idx_bbox, bbox_line in enumerate(bbox_lines):
@@ -625,6 +642,7 @@ for page_no, page in enumerate(PAGES):
                 print(f'{" " * 10} y2: {bbox_line["bottom_right_y"]}.')
 
     # Find ayah(s)
+    # TODO: validate surah and ayah based on Tanzil' metadata on the fly
     if VERBOSE_MODE:
         print(f'{" " * 8} Defining ayah bounding boxes ...')
     bbox_ayas = [bbox for bbox in markers if bbox['label'] == 'ayah']
